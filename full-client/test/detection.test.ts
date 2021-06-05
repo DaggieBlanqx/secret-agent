@@ -3,6 +3,8 @@ import * as Fs from 'fs';
 import * as fpscanner from 'fpscanner';
 import Core, { Session } from '@secret-agent/core';
 import { ITestKoaServer } from '@secret-agent/testing/helpers';
+import IDevtoolsSession, { DevtoolsEvents } from '@secret-agent/interfaces/IDevtoolsSession';
+import { IExceptionRewriter } from '@secret-agent/interfaces/IPuppetDebugger';
 import { Handler } from '../index';
 
 const fpCollectPath = require.resolve('fpcollect/src/fpCollect.js');
@@ -299,3 +301,112 @@ test('should not leave stack trace markers when calling in page functions', asyn
     `Error: All Error\n    at HTMLDocument.outerFunction [as querySelectorAll] (${url}:11:19)\n    at <anonymous>:1:10`,
   );
 });
+
+test('should escape proxy detection', async () => {
+  const httpsserver = await Helpers.runHttpsServer((req, res) => res.end('<h1>Hi</h1>'));
+  const agent = await handler.createAgent({ showReplay: false });
+  Helpers.needsClosing.push(agent);
+  const tabId = await agent.activeTab.tabId;
+  const sessionId = await agent.sessionId;
+  const tab = Session.getTab({ tabId, sessionId });
+  const puppetDebugger = tab.puppetPage.debugger;
+  await puppetDebugger.modifyStacktraces(['<anonymuos>'], ...proxyLeakConditions);
+
+  const page = tab.puppetPage;
+  await agent.goto(httpsserver.baseUrl);
+  await agent.waitForPaintingStable();
+  // await agent.waitForMillis(5e3);
+  page.on('console', console.log);
+
+  const result = await page.evaluate<string>(`(() => {
+  // return String(new TypeError("Class extends value " + Permissions.prototype.query + " is not a constructor or null"))
+   try {
+        class Blah extends Permissions.prototype.query {}
+        return ''
+    } catch (error) {
+        return String(error)
+    }
+  })();`);
+
+  expect(result).toBe(
+    'TypeError: Class extends value function query() { [native code] } is not a constructor or null',
+  );
+
+  const result2 = await page.evaluate<string>(`(() => {
+
+  const testFn = Function.prototype.toString
+    try {
+        testFn instanceof testFn;
+        return '';
+    } catch (error) {
+        return error.stack
+    }
+  })();`);
+  expect(result2).not.toContain(`Proxy.[Symbol.hasInstance]`);
+  // await agent.click(agent.document.querySelector('[for="toggle-open-creep-stealth"]'));
+});
+
+test.only('should escape proxy detection on creepjs', async () => {
+  const agent = await handler.createAgent({ showReplay: false });
+  Helpers.needsClosing.push(agent);
+  const tabId = await agent.activeTab.tabId;
+  const sessionId = await agent.sessionId;
+  const tab = Session.getTab({ tabId, sessionId });
+  const puppetDebugger = tab.puppetPage.debugger;
+  await puppetDebugger.modifyStacktraces(['<anonymuos>'], ...proxyLeakConditions);
+
+  await agent.goto('https://abrahamjuliot.github.io/creepjs/');
+  await agent.waitForPaintingStable();
+  await agent.waitForMillis(5e3);
+
+  const stealthRating = await agent.document.querySelector('.stealth-rating').textContent;
+  expect(stealthRating).toBe('0% detected');
+}, 20e3);
+
+const proxyLeakConditions: IExceptionRewriter[] = [
+  {
+    matchCondition(x) {
+      return `String(${x}).includes("Class extends value [object Function]")`;
+    },
+    async callbackFn({ sourceLocation, evaluateOnCallFrame, callFunctionOnError, searchSource }) {
+      const { lineNumber, position } = sourceLocation;
+
+      // search for script source location
+      const locations = await searchSource(' extends ', lineNumber);
+      if (!locations?.length) return null;
+      const match = locations[0];
+      const parts = match.lineContent.split(/\s+/);
+
+      // find variable name
+      let fnOverridden = '';
+      for (const part of parts) {
+        if (!part) continue;
+        const startIndex = match.lineContent.indexOf(part);
+        if (startIndex <= position && startIndex + part.length > position) {
+          fnOverridden = part;
+          break;
+        }
+      }
+      if (!fnOverridden)
+        throw new Error(
+          `Unable to locate variable in script: "${match.lineContent}" at position ${position}`,
+        );
+
+      const fnToString = await evaluateOnCallFrame(`String(${fnOverridden})`);
+
+      await callFunctionOnError(`function(){
+        this.message = this.message.replace("extends value [object Function]", 'extends value ${fnToString}');
+        this.stack = this.stack.replace("extends value [object Function]", 'extends value ${fnToString}');
+       }`);
+    },
+  },
+  {
+    matchCondition: x => `${x}.stack.includes("at Proxy.[Symbol.hasInstance]")`,
+    async callbackFn({ callFunctionOnError }) {
+      await callFunctionOnError(`function() {
+        this.message = this.message.replace("Proxy.[Symbol.hasInstance]", 'Function.[Symbol.hasInstance]');
+        this.stack = this.stack.replace("Proxy.[Symbol.hasInstance]", 'Function.[Symbol.hasInstance]');
+       }`);
+    },
+  },
+];

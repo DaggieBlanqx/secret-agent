@@ -32,6 +32,7 @@ import { BrowserContext } from './BrowserContext';
 import { Worker } from './Worker';
 import ConsoleMessage from './ConsoleMessage';
 import Frame from './Frame';
+import Debugger from './Debugger';
 import ConsoleAPICalledEvent = Protocol.Runtime.ConsoleAPICalledEvent;
 import ExceptionThrownEvent = Protocol.Runtime.ExceptionThrownEvent;
 import WindowOpenEvent = Protocol.Page.WindowOpenEvent;
@@ -44,6 +45,7 @@ export class Page extends TypedEventEmitter<IPuppetPageEvents> implements IPuppe
   public mouse: Mouse;
   public workersById = new Map<string, Worker>();
   public readonly browserContext: BrowserContext;
+  public readonly debugger: Debugger;
   public readonly opener: Page | null;
   public networkManager: NetworkManager;
   public framesManager: FramesManager;
@@ -98,6 +100,7 @@ export class Page extends TypedEventEmitter<IPuppetPageEvents> implements IPuppe
     this.browserContext = browserContext;
     this.keyboard = new Keyboard(devtoolsSession);
     this.mouse = new Mouse(devtoolsSession, this.keyboard);
+    this.debugger = new Debugger(devtoolsSession);
     this.networkManager = new NetworkManager(
       devtoolsSession,
       this.logger,

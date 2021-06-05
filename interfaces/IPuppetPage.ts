@@ -8,6 +8,7 @@ import { IPuppetNetworkEvents } from './IPuppetNetworkEvents';
 import { IPuppetWorker } from './IPuppetWorker';
 import IDevtoolsSession from './IDevtoolsSession';
 import IPuppetDialog from './IPuppetDialog';
+import IPuppetDebugger from './IPuppetDebugger';
 
 export interface IPuppetPage extends ITypedEventEmitter<IPuppetPageEvents> {
   id: string;
@@ -18,6 +19,7 @@ export interface IPuppetPage extends ITypedEventEmitter<IPuppetPageEvents> {
   workers: IPuppetWorker[];
   mainFrame: IPuppetFrame;
   opener?: IPuppetPage;
+  debugger: IPuppetDebugger;
 
   isClosed: boolean;
   navigate(url: string, options?: { referrer?: string }): Promise<{ loaderId: string }>;
