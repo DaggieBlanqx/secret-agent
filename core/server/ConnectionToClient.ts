@@ -189,6 +189,7 @@ export default class ConnectionToClient extends TypedEventEmitter<{
       timezoneId: configuration.timezoneId,
       blockedResourceTypes: session.options.blockedResourceTypes,
       upstreamProxyUrl: session.upstreamProxyUrl,
+      geolocation: session.options.geolocation,
       userAgentString,
       osPlatform,
     };
